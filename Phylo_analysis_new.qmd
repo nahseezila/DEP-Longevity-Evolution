@@ -1,0 +1,1963 @@
+---
+title: Life history results
+author: Zeeshan Syed
+date: '`r Sys.Date()`'
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    toc: true
+    number-sections: true
+    code-fold: true
+    code-tools: true
+execute:
+  freeze: auto  # Optional: avoids re-running unchanged code
+  echo: true
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(tidyverse,readxl,survival,survminer,broom, broom.helpers, ggfortify,ggpmisc, DescTools, ggtree, surface, eha, ggtree, ggtreeExtra, ggrepel,corrplot, ggridges,gridExtra, tidytree, ggnewscale,ggsci,ggh4x)
+pacman::p_load(ape, nlme,multcomp, phytools,geiger,picante,phangorn,caper,OUwie,mvMORPH, geomorph)
+pacman::p_load(leaflet, plotly,ggiraph,crosstalk, DT)
+
+
+```
+
+# Load data
+
+```{r}
+#| label: Function to combine multiple datasets by species
+#| include: false
+multi_inner<- function(...){
+  df1 = list(...)[[1]]
+  df2 = list(...)[[2]]
+  col1 = colnames(df1)[1]
+  col2 = colnames(df2)[1]
+  xxx = inner_join(..., by = "Species")
+  return(xxx)
+}
+```
+
+## Load tree and make ultrametric
+
+```{r}
+#| include: false
+#load the tree
+Flytree<-readNexus(file="../data/FlyTree_correctednames.3.0.nex")
+is.ultrametric(Flytree)
+
+#Why is the tree not ultrametric?
+#After saving the tree to file, we lose some numerical precision, which can falsely cause the ultrametric tree to fail the is.ultrametric() test
+ult.Flytree<-force.ultrametric(Flytree, method="nnls")
+#Verify that it is ultrametric
+is.ultrametric(ult.Flytree)
+rm(Flytree)
+
+```
+
+## Load phenotype data
+
+```{r}
+#| message: false
+df_species_metadata<- read_excel("../data/Species_Taxodros.xlsx")%>%
+  dplyr::select(-c(Note, `...2`))%>%
+  rowwise()%>%
+  mutate(Group = case_when(is.na(Group) ~ Genus,
+                           .default =  Group),
+         Broad_clade = case_when(Group ==  "melanogaster" ~ "Melanogaster",
+                                 Group ==  "montium" ~ "Montium",
+                                 Group ==  "repleta" ~ "Repleta",
+                                 Group %in% c("immigrans")   ~ "Immigrans",
+                                 Group %in% c("willistoni", "saltans")   ~ "Willistoni/Saltans",
+                                 #Group %in% c("cardini", "funebris", "quinaria","tripunctata", "tumiditarsus" )   ~ "Car_Qui_Fun",
+                                 Group %in% c("obscura" )   ~ "Obscura",
+                                 Group %in% c("virilis" )   ~ "Virilis",
+                                 #Group %in% c("robusta", "melanica" )   ~ "Rob_Mel",
+                                 Group %in% c("Zaprionus")   ~ "Zaprionus",
+                                 .default = "Miscellaneous"
+                               ),
+         Species = sub(". ", "_", Species),
+         Species = sub("hamatofila","hematofila", Species),
+         Species = sub("hamatofila","hematofila", Species),
+         Species = sub("D_kepulauana","D_kepulauna", Species), 
+         Species = sub("D_paranaensis","D_paranensis", Species),
+         Broad_clade = factor(Broad_clade, levels = c("Zaprionus",
+                                         "Immigrans",
+                                         "Virilis",
+                                         "Repleta",
+                                         "Willistoni/Saltans",
+                                         "Obscura",
+                                         "Melanogaster",
+                                         "Montium",
+                                         "Miscellaneous")))
+
+
+df_non_demo_data<- read_excel("../data/master.dataset.non.demo.xlsx", sheet = "Data")
+
+
+
+
+
+df_demographic_metrics<- read_excel("../data/life_history_summary.xlsx")
+#colnames(df_demographic_metrics)
+
+
+
+
+
+df_VertComparativeData <- readRDS("~/Projects/Longevity_fecundity/data/VertComparativeData.rds")
+
+
+combo_phylo_demo<-match.phylo.data(ult.Flytree, df_demographic_metrics%>% column_to_rownames("Species"))
+
+combo_phylo_demo$data<- combo_phylo_demo$data%>%
+  mutate_if(is.character, as.numeric)
+
+
+
+caperdata_demo<- comparative.data(combo_phylo_demo$phy,
+                                  data = combo_phylo_demo$data%>% 
+                                    rownames_to_column("Species"), 
+                                  names.col = Species, 
+                                  vcv = T, vcv.dim = 3, warn.dropped = T )
+
+
+combo_phylo_demo_log<- match.phylo.data( ult.Flytree,
+                                         df_demographic_metrics%>%
+                                           transmute( 
+                                             Species = Species,
+                                             ls50_f = log(ls50_f),
+                                             ls50_m = log(ls50_m),
+                                             ls50_sa = log(ls50_sa),
+                                             ls50_sd = ls50_sd,
+                                             ls90_f = log(ls90_f),
+                                             ls90_m = log(ls90_m),
+                                             ls90_sa = log(ls90_sa),
+                                             ls90_sd = ls90_sd,
+                                             e0_f = log(e0_f ),
+                                             e0_m = log(e0_m ),
+                                             e0_sa = log(e0_sa ),
+                                             e0_sd = e0_sd,
+                                             G0_f = Lifespan_Gini_f,
+                                             G0_m = Lifespan_Gini_m,
+                                             G0_sd = G0_f - G0_m,
+                                             H_f = Keyfitz_Entropy_f,
+                                             H_m = Keyfitz_Entropy_m,
+                                             H_sd = Keyfitz_sd,
+                                             std_aging_rate_f = rate_f,
+                                             std_aging_rate_m = rate_m, 
+                                             std_aging_rate_sa = rate_sa, 
+                                             std_aging_rate_sd = rate_sd,
+                                             R0 = log(net_reproductive_output),
+                                             Peak_Age = log(Peak_Age),
+                                             Fmax = Peak_Fecundity,
+                                             Sen_rep = -Senescence_Slope,
+                                             Sh_rep = Shape_Rep,
+                                             repro_maturity_f = factor(Age_reproductive_maturity_F),
+                                             repro_maturity_m = factor(Age_reproductive_maturity_M),
+                                             repro_maturity_sd = log(Age_reproductive_maturity_F/Age_reproductive_maturity_M)
+                                           )%>%
+                                           column_to_rownames("Species"))
+
+combo_phylo_demo_log$data<- combo_phylo_demo_log$data%>%
+  mutate_if(is.character, as.numeric)
+
+
+
+
+```
+
+
+
+# Explore raw data
+- Plot data distribution.
+
+## Make theme and data subset functions
+
+**All traits show considerable variation among groups**
+
+```{r}
+#set theme for all density plots
+# Define your custom theme and scales as an object
+# 
+colorscheme_9 = list(
+  Zaprionus = "#57744C",
+  Immigrans = "#6ac9ca",
+  Virilis = "#4753a4",
+  Repleta = "#692369",
+  `Willistoni/Saltans` = "#3f5ba9",
+  Obscura = "#c4d930",
+  Melanogaster = "#fac9d4",
+  Montium = "#a5c3db",
+  `All species` = "grey50"
+)
+
+density_theme <- list(
+  stat_density_ridges(
+    aes(fill = Broad_clade),
+    color = "black",
+    alpha = 0.5, panel_scaling = T,
+    quantile_lines = F,
+    scale = 0.6, linewidth = 0.2),
+  scale_y_discrete("", expand = c(0, 0) ),
+  scale_fill_manual("", values = colorscheme_9),
+  theme_ridges(font_family = "Times", center_axis_labels = T, font_size = 10),
+  theme(
+    axis.title = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(angle = 90,hjust = 0.5, size = 8),
+    legend.text = element_text(size = 8),
+    legend.position = "none",
+    plot.margin = margin(t = 25,r = 5,l = 5,b = 0, unit = "pt")
+  )
+)
+
+make_df_for_density <- function(metric) {
+  select_cols <- c("Species",
+                   paste0(metric, "_f"),
+                   paste0(metric, "_m"),
+                   paste0(metric, "_sd")
+                   )
+  df_demographic_metrics<- df_demographic_metrics %>%
+  dplyr::mutate(H_f = Keyfitz_Entropy_f,H_m = Keyfitz_Entropy_m, H_sd = Keyfitz_sd,
+                G0_f = Lifespan_Gini_f, G0_m = Lifespan_Gini_m,G0_sd = G0_f -G0_m)
+  
+  df <- df_demographic_metrics %>%
+    dplyr::select(all_of(select_cols)) %>% #view()
+    pivot_longer(
+      cols = -c(Species),
+      names_to = "Y",
+      values_to = metric,
+      names_prefix = paste0(metric, "_")
+    ) %>%
+    mutate(
+      Y = case_when(
+        Y == "f" ~ "Female (Days)",
+        Y == "m" ~ "Male (Days)",
+        Y == "sd" ~ "Sex-difference",
+        .default = Y
+      )
+    ) %>%
+    left_join(df_species_metadata %>%
+                select(Species, Broad_clade)) %>%
+    bind_rows(
+      df_demographic_metrics %>%
+        dplyr::select(all_of(select_cols)) %>% #view()
+        pivot_longer(
+          cols = -c(Species),
+          names_to = "Y",
+          values_to = metric,
+          names_prefix = paste0(metric, "_")
+        ) %>%
+        mutate(
+          Y = case_when(
+            Y == "f" ~ "Female (Days)",
+            Y == "m" ~ "Male (Days)",
+            Y == "sd" ~ "Sex-difference",
+            .default = Y
+          ),
+          Broad_clade = "All species"
+        )
+    ) %>%
+    filter(Broad_clade != "Miscellaneous") %>%
+    mutate(Broad_clade = factor(
+      Broad_clade,
+      levels = c(
+        "All species",
+        "Montium",
+        "Melanogaster",
+        "Obscura",
+        "Willistoni/Saltans",
+        "Repleta",
+        "Virilis",
+        "Immigrans",
+        "Zaprionus"
+      ),
+      ordered = T
+    ))
+  return(df)
+}
+
+```
+## Mortality metrics
+### Ls50 (median lifespan): Female ls50 ranged from 2 -18 weeks. Male ls50 ranged from 1.5 – 17 weeks. Species (sex-average) ls50 ranged from 1.75 – 15 weeks. Sex-bias (log(female/male)) in LS50 ranged from highly female bias (1.18) to male biased (-0.75).
+
+::: scrollable
+```{r, fig.cap= "Density ridges of median lifespan (x-axis) by sex (facet) and broad clade.\nThe grey density plots show the overall distribution across all 148 species", message=FALSE, fig.width=8, fig.height=10}
+
+df_plot_ls50 <- make_df_for_density("ls50")
+p_ls50_density <- df_plot_ls50 %>%
+  ggplot(aes(x = ls50, y = Broad_clade)) +
+  density_theme+
+  scale_x_continuous() +
+  facet_wrap( ~ Y, ncol = 3, scales = "free_x", strip.position = "top") +
+  facetted_pos_scales(
+    x = list(
+      Y == "Female (Days)" ~ scale_x_continuous(name = "Median lifespan",
+                                                limits = c(0, 120), n.breaks = 3),
+      Y == "Male (Days)"   ~ scale_x_continuous(name = "Median lifespan",
+                                                limits = c(0, 120), n.breaks = 3),
+      Y == "Sex-difference" ~ scale_x_continuous(name = "Median lifespan", n.breaks = 3) # Leaves this one truly free
+    )
+  ) 
+
+#p_ls50_density
+
+```
+:::
+
+### Maximum lifespan (ls90) of females ranged from 5 – 22 weeks. Male ls90 ranged from 4 – 23.5 weeks. Species ls90 ranged from 4.5 – 22.5 weeks, and sex-bias ranged from 0.6 to - 0.74
+
+::: scrollable
+```{r, fig.cap= "Density ridges of maximum lifespan (x-axis) by sex (facet) and broad clade.\nThe grey density plots show the overall distribution across all 148 species", message=FALSE, fig.width=8, fig.height=10}
+#| message: false
+
+df_plot_ls90 <- make_df_for_density("ls90")
+maxls90<- max(df_plot_ls90$ls90)+15
+
+
+p_ls90_density <- df_plot_ls90 %>%
+  ggplot(aes(x = ls90, y = Broad_clade)) +
+  density_theme+
+  scale_x_continuous(n.breaks = 4) +
+  facet_wrap( ~ Y, ncol = 3, scales = "free_x", strip.position = "top") +
+  facetted_pos_scales(
+    x = list(
+      Y == "Female (Days)" ~ scale_x_continuous(name = "90th percentile lifespan",
+                                                limits = c(0, maxls90), n.breaks = 4),
+      Y == "Male (Days)"   ~ scale_x_continuous(name = "90th percentile lifespan",
+                                                limits = c(0, maxls90), n.breaks = 4),
+      Y == "Sex-difference" ~ scale_x_continuous(name = "90th percentile lifespan", n.breaks = 4) # Leaves this one truly free
+    )
+  ) 
+
+#p_ls90_density
+
+```
+:::
+
+### Life expectancy : Adult life expectancy 
+
+::: scrollable
+```{r, fig.cap= "Density ridges of Life expectancy at eclosion (x-axis) by sex (facet) and broad clade.\nThe grey density plots show the overall distribution across all 148 species", message=FALSE, fig.width=12, fig.height=8}
+#| message: false
+df_plot_e0 <- make_df_for_density("e0")
+maxe0<- max(df_plot_e0$e0)+15
+
+
+p_e0_density <- df_plot_e0 %>%
+  ggplot(aes(x = e0, y = Broad_clade)) +
+  density_theme+
+  scale_x_continuous() +
+  facet_wrap( ~ Y, ncol = 3, scales = "free_x", strip.position = "top") +
+  facetted_pos_scales(
+    x = list(
+      Y == "Female (Days)" ~ scale_x_continuous(name = "Adult life expectancy",
+                                                limits = c(0, maxe0),n.breaks = 4),
+      Y == "Male (Days)"   ~ scale_x_continuous(name = "Adult life expectancy",
+                                                limits = c(0, maxe0),n.breaks = 4),
+      Y == "Sex-difference" ~ scale_x_continuous(name = "Adult life expectancy", limits = c(-1, 1), n.breaks = 3) # Leaves this one truly free
+    )
+  ) 
+
+#p_e0_density
+```
+## Combine: Supp fig 1
+```{r}
+
+ggarrange(p_e0_density, p_ls50_density+theme(axis.text.y = element_blank()), p_ls90_density+theme(axis.text.y = element_blank()), ncol = 3, labels = "auto")
+```
+:::
+
+## Shape metrics   
+- Standardized aging rate : Standardized aging rate ranged from 0.53 - 9.39, 0.65 to 9.43, and 0.59 - 9.41 for females, males and average for species, respectively. Sex difference in aging rate ranged from 1.25 (higher aging rate in female) to (-1.17)
+
+::: scrollable
+```{r, fig.cap= "Density ridges of Standardized aging rate (x-axis) by sex (facet) and broad clade.\nThe grey density plots show the overall distribution across all 148 species", message=FALSE, fig.width=12, fig.height=8}
+#| message: false
+
+df_plot_rate <- make_df_for_density("rate")
+maxrate<- round(max(df_plot_rate$rate)+0.06*abs(max(df_plot_rate$rate)))
+minrate<- round(min(df_plot_rate$rate)-0.05*abs(min(df_plot_rate$rate)))
+
+
+p_rate_density <- df_plot_rate %>%
+  ggplot(aes(x = rate, y = Broad_clade)) +
+  density_theme+
+  facet_wrap( ~ Y, ncol = 3, scales = "free_x", strip.position = "top") +
+  facetted_pos_scales(
+    x = list(
+      Y == "Female (Days)" ~ scale_x_continuous(name = "Std. aging rate",
+                                                limits = c(minrate, maxrate),
+                                                n.breaks = 3),
+      Y == "Male (Days)"  ~ scale_x_continuous(name = "Std. aging rate",
+                                                limits = c(minrate, maxrate),
+                                                n.breaks = 3),
+      Y == "Sex-difference" ~ scale_x_continuous(name = "Std. aging rate", 
+                                                 n.breaks = 3) # Leaves this one truly free
+    )
+  ) 
+
+p_rate_density
+```
+:::
+
+### -   Variation in mortality : Keyfitz entropy (H)
+
+::: scrollable
+```{r, fig.cap= "Density ridges of Variation in mortality(x-axis) by sex (facet) and broad clade.\nThe grey density plots show the overall distribution across all 148 species", message=FALSE, fig.width=12, fig.height=8}
+#| message: false
+
+df_plot_H <- make_df_for_density("H")
+maxH<- (max(df_plot_H$H)+0.05*abs(max(df_plot_H$H)))
+minH<- (min(df_plot_H$H))
+
+
+p_H_density <- df_plot_H %>%
+  ggplot(aes(x = H, y = Broad_clade)) +
+  density_theme+
+  scale_x_continuous() +
+  facet_wrap( ~ Y, ncol = 3, scales = "free_x", strip.position = "top") +
+  facetted_pos_scales(
+    x = list(
+      Y == "Female (Days)" ~ scale_x_continuous(name = "Keyfitz entropy",
+                                                limits = c(0, maxH)),
+      Y == "Male (Days)"  ~ scale_x_continuous(name = "Keyfitz entropy",
+                                                limits = c(0, maxH)),
+      Y == "Sex-difference" ~ scale_x_continuous(name = "Keyfitz entropy", 
+                                                 n.breaks = 3) # Leaves this one truly free
+    )
+  ) 
+
+
+
+
+
+
+# p_H <- df_demographic_metrics%>%
+#   dplyr::select(Species, H_f = Keyfitz_Entropy_f, H_m = Keyfitz_Entropy_m, H_sd = Keyfitz_sd)%>%
+#   pivot_longer(cols = -c(Species), names_to = "Y", values_to = "Keyfitz entropy", names_prefix = "H_")%>%
+#   mutate(Y = case_when(Y == "f" ~ "Female",
+#                        Y == "m" ~ "Male",
+#                        .default = "Sex-difference"))%>%
+#   left_join(df_species_metadata%>%select(Species,Broad_clade), by = "Species")%>%
+#   filter(Broad_clade != "Miscellaneous")%>%
+#   bind_rows(df_demographic_metrics%>%
+#   dplyr::select(Species, H_f = Keyfitz_Entropy_f, H_m = Keyfitz_Entropy_m, H_sd = Keyfitz_sd)%>%
+#   pivot_longer(cols = -c(Species), names_to = "Y", values_to = "Keyfitz entropy", names_prefix = "H_")%>%
+#   mutate(Y = case_when(Y == "f" ~ "Female",
+#                        Y == "m" ~ "Male",
+#                        .default = "Sex-difference"))%>%
+#   mutate(Broad_clade = "All species"))%>%
+#   ggplot(aes(x = `Keyfitz entropy`,  y= Broad_clade))+
+#   scale_x_continuous()+
+#   facet_wrap(~ Y, scales = "free_x", ncol = 3, strip.position = "top")+
+#   density_theme
+
+p_H_density
+```
+
+:::
+
+### -   Inequality in mortality : Gini (G0)
+
+::: scrollable
+```{r, fig.cap= "Density ridges of Variation in mortality(x-axis) by sex (facet) and broad clade.\nThe grey density plots show the overall distribution across all 148 species", message=FALSE, fig.width=12, fig.height=8}
+#| message: false
+
+df_plot_gini <- make_df_for_density("G0")
+maxG0<- round(max(df_plot_gini$G0)+0.1*abs(max(df_plot_gini$G0)),2)
+minG0<- round(min(df_plot_gini$G0)-0.05*abs(min(df_plot_gini$G0)),2)
+
+
+p_gini_density <- df_plot_gini %>%
+  ggplot(aes(x = G0, y = Broad_clade)) +
+  density_theme+
+  scale_x_continuous() +
+  facet_wrap( ~ Y, ncol = 3, scales = "free_x", strip.position = "top") +
+  facetted_pos_scales(
+    x = list(
+      Y == "Female (Days)" ~ scale_x_continuous(name = "Lifespan Gini",
+                                                limits = c(0, maxG0)),
+      Y == "Male (Days)"  ~ scale_x_continuous(name = "Lifespan Gini",
+                                                limits = c(0, maxG0)),
+      Y == "Sex-difference" ~ scale_x_continuous(name = "Lifespan Gini", 
+                                                 n.breaks = 3) # Leaves this one truly free
+    )
+  ) 
+
+p_gini_density
+
+
+
+# p_G0 <- df_demographic_metrics%>%
+#   dplyr::select(Species, G0_f = Lifespan_Gini_f, G0_m = Lifespan_Gini_m)%>%
+#   mutate(G0_sd = G0_f -G0_m)%>%
+#   pivot_longer(cols = -c(Species), names_to = "Y", values_to = "Gini index", names_prefix = "G0_")%>%
+#   mutate(Y = case_when(Y == "f" ~ "Female",
+#                        Y == "m" ~ "Male",
+#                        .default = "Sex-difference"))%>%
+#   left_join(df_species_metadata%>%select(Species,Broad_clade), by = "Species")%>%
+#   filter(Broad_clade != "Miscellaneous")%>%
+#   bind_rows(df_demographic_metrics%>%
+#               dplyr::select(Species, G0_f = Lifespan_Gini_f, G0_m = Lifespan_Gini_m)%>%
+#     mutate(G0_f = Lifespan_Gini_f, G0_m = Lifespan_Gini_m,G0_sd = G0_f -G0_m)%>%
+#   pivot_longer(cols = -c(Species), names_to = "Y", values_to = "Gini index", names_prefix = "G0_")%>%
+#   mutate(Y = case_when(Y == "f" ~ "Female",
+#                        Y == "m" ~ "Male",
+#                        .default = "Sex-difference"))%>%
+#   mutate(Broad_clade = "All species"))%>%
+#   ggplot(aes(x = `Gini index`,  y= Broad_clade))+
+#   scale_x_continuous()+
+#   facet_wrap(~ Y, scales = "free_x", ncol = 4, strip.position = "top")+
+#   density_theme
+# 
+# p_G0
+```
+
+## Combine Supp Fig 2
+
+```{r}
+ggarrange(p_rate_density, 
+          p_H_density + theme(axis.text.y = element_blank()), 
+          p_gini_density+ theme(axis.text.y = element_blank()), 
+                                ncol = 3, labels = "auto")
+```
+
+:::
+Age at reproductive maturity
+
+```{r}
+p_repmat_density <- df_demographic_metrics %>%
+  dplyr::select(Species, Age_reproductive_maturity_F, Age_reproductive_maturity_M) %>%
+  pivot_longer(
+    cols = -c(Species),
+    names_to = "Y",
+    values_to = "Age at reproductive maturity",
+    names_prefix = "Age_reproductive_maturity_"
+  ) %>%
+  mutate(Y = case_when(Y == "F" ~ "Female", Y == "M" ~ "Male", .default = "Species average")) %>%
+  left_join(df_species_metadata %>% select(Species, Broad_clade), by = "Species") %>%
+  filter(Broad_clade != "Miscellaneous") %>%
+  bind_rows(
+    df_demographic_metrics %>%
+      dplyr::select(Species, Age_reproductive_maturity_F, Age_reproductive_maturity_M) %>%
+      pivot_longer(
+        cols = -c(Species),
+        names_to = "Y",
+        values_to = "Age at reproductive maturity",
+        names_prefix = "Age_reproductive_maturity_"
+      ) %>%
+      mutate(
+        Y = case_when(Y == "F" ~ "Female", Y == "M" ~ "Male", .default = "Species average")
+      ) %>% mutate(Broad_clade = "All species")
+  ) %>%
+  ggplot(aes(x = `Age at reproductive maturity`, y = Broad_clade)) +
+  scale_x_continuous() +
+  facet_wrap( ~ Y,
+              scales = "free_x",
+              ncol = 4,
+              strip.position = "top") +
+  density_theme
+
+p_repmat_density
+```
+
+
+
+### Fecundity Metrics
+
+Below is a cartoon depicting the relation between survival, age-specific fecundity, and fecundity scaled by survival and Net reproductive output (lifetime fecundity scaled by survival, i.e., area under the black curve):
+
+![](data/Demo_cartoon.png){fig-align="center" width="351"}
+
+
+::: scrollable
+```{r, fig.cap= "Density ridges of Reproductive output(x-axis) by broad clade.\nThe grey density plots show the overall distribution across all 148 species Standardized early reproductive output values are in %. All other values are log transformed", message=FALSE, fig.width=12, fig.height=8}
+
+
+df_demographic_metrics %>%
+  dplyr::select(Species,
+                net_reproductive_output,
+                Peak_Fecundity,
+                Senescence_Slope,
+                Shape_Rep) %>%
+  pivot_longer(cols = -c(Species),
+               names_to = "Y",
+               values_to = "Reproductive output") %>%
+  mutate(
+    Y = case_when(
+      Y == "net_reproductive_output" ~ "Net repro. output",
+      Y == "Peak_Fecundity" ~ "Peak fecundity",
+      Y == "Senescence_Slope" ~ "Repro. sen",
+      Y == "Shape_Rep" ~ "Repro. shape"
+    ),
+    Y = factor(Y, levels = c(
+      "Net repro. output", "Peak fecundity", "Repro. sen", "Repro. shape"
+    ))
+  ) %>%
+  left_join(df_species_metadata %>% select(Species, Broad_clade)) %>%
+  filter(Broad_clade != "Miscellaneous") %>%
+  bind_rows(
+    df_demographic_metrics %>%
+      dplyr::select(
+        Species,
+        net_reproductive_output,
+        Peak_Fecundity,
+        Senescence_Slope,
+        Shape_Rep
+      ) %>%
+      pivot_longer(
+        cols = -c(Species),
+        names_to = "Y",
+        values_to = "Reproductive output"
+      ) %>%
+      mutate(
+    Broad_clade = "All species",  
+    Y = case_when(
+      Y == "net_reproductive_output" ~ "Net repro. output",
+      Y == "Peak_Fecundity" ~ "Peak fecundity",
+      Y == "Senescence_Slope" ~ "Repro. sen",
+      Y == "Shape_Rep" ~ "Repro. shape"
+    ),
+    Y = factor(Y, levels = c(
+      "Net repro. output", "Peak fecundity", "Repro. sen", "Repro. shape"
+    ))
+  )
+  )%>%
+  mutate(Broad_clade = factor(
+    Broad_clade,
+    levels = c(
+      "All species",
+      "Montium",
+      "Melanogaster",
+      "Obscura",
+      "Willistoni/Saltans",
+      "Repleta",
+      "Virilis",
+      "Immigrans",
+      "Zaprionus"
+    ),
+    ordered = T
+  )) %>%
+  ggplot(aes(x = `Reproductive output` + 1, y = Broad_clade)) +
+  facet_wrap( ~ Y,
+              scales = "free_x",
+              nrow = 1,
+              strip.position = "top") +
+  scale_x_log10("Reproductive output metrics") +
+  density_theme
+```
+
+:::
+
+### Univariate mapping - plot traits on the tree
+
+```{r}
+# # set theme 
+# tree_theme<- list(
+#   scale_fill_manual("", values = colorscheme_9),
+#   scale_color_manual("", values = colorscheme_9),
+#   theme_classic2(),
+#   theme( axis.title = element_blank(), 
+#          axis.text.x = element_text(family = "Arial",size = 6), 
+#          legend.position = "bottom",
+#          legend.spacing = unit(0.1, "cm"),
+#          legend.key.size = unit(0.1, "cm"),
+#          legend.text = element_text(family = "Arial",size = 9),
+#          legend.justification.bottom = 0.5,
+#          axis.line.y = element_blank(),
+#          axis.ticks = element_blank(),
+#          legend.box = "horizontal",
+#          axis.text.y = element_blank(),
+#          strip.background = element_blank(),
+#          strip.text = element_text(family = "Arial", size = 7)),
+#   guides(fill = guide_legend(ncol = 9, nrow = 1, byrow = TRUE))
+# )
+
+ #set data
+dat3<- combo_phylo_demo_log$data%>% rownames_to_column("Species")%>% 
+  left_join(df_species_metadata %>%select(Species,Broad_clade), by = "Species")%>%
+  select(-c(ls50_sa,ls90_sa, e0_sa, std_aging_rate_sa))
+
+#plot basic tree to add layers 
+phy_plot <- combo_phylo_demo$phy
+p_tree <- ggtree(combo_phylo_demo$phy, layout = "circular" )#%<+% (dat3 %>% select(Species, Broad_clade))
+
+write.nexus(phy_plot, file = "phyplot.nexus")
+write.csv(dat3, file = "dat3.csv")
+annotdat<- dat3%>%select(Species, Broad_clade)
+```
+
+# Sex difference
+
+```{r}
+e0_f <- combo_phylo_demo_log$data$e0_f
+names(e0_f) <- combo_phylo_demo_log$phy$tip.label
+e0_m <- combo_phylo_demo_log$data$e0_m
+names(e0_m) <- combo_phylo_demo_log$phy$tip.label
+#head(e0_f,2)
+
+phyl.pairedttest(tree = combo_phylo_demo_log$phy, x1 = e0_f, x2 = e0_m, fixed = F)
+
+beta_f <- combo_phylo_demo_log$data$std_aging_rate_f
+names(beta_f) <- combo_phylo_demo_log$phy$tip.label
+beta_m <- combo_phylo_demo_log$data$std_aging_rate_m
+names(beta_m) <- combo_phylo_demo_log$phy$tip.label
+#head(beta_m,2)
+
+phyl.pairedttest(tree = combo_phylo_demo_log$phy, x1 = beta_f, x2 = beta_m, fixed = F)
+
+
+```
+
+
+
+# Pace and shape:
+
+## Female demographic pPCA
+
+The variation in life history traits among animals is evident across eight traits. As predicted by the fast–slow continuum, time-dependent traits like median and maximum lifespan, life expectancy at eclosion, and reproductive maturity are positively correlated (Fig. 3). These traits form one axis of variation in life history strategies, accounting for 46% of the variation in the analysis of 148 species. Along this axis, species range from short-lived early reproducers, such as D. persimillis and D. rhopaloa, to long-lived, slow-maturing species like D. bifurca. However, contrary to the prediction, long-lived species also produced more offspring.
+
+```{r}
+#| warning: false
+female_demodata<- combo_phylo_demo_log$data %>%
+      dplyr::select(
+        ls90 = ls90_f,
+        e0 = e0_f,
+        ARM = repro_maturity_f,
+        beta = std_aging_rate_f,
+        G0 = G0_f, 
+        H = H_f
+      ) %>%
+      #mutate(repro_maturity_f = numeric(repro_maturity_f))%>%
+      scale()
+
+pPCA_demo_f <- as.prcomp(
+  phyl.pca(
+    tree = combo_phylo_demo_log$phy,
+    Y = female_demodata,
+    mode = "cov",
+    scale = T,
+    method = "lambda"
+  )
+)
+
+phyl.pca(
+    tree = combo_phylo_demo_log$phy,
+    Y = female_demodata,
+    mode = "cov",
+    scale = T,
+    method = "lambda"
+  )
+
+
+```
+### biplot
+
+```{r}
+df_pcametadata<-df_species_metadata %>%filter(Species != "S_latifasciaeformis")
+
+frac_var <- function(x) x^2/sum(x^2)
+library(scales)
+
+axisnames<- pPCA_demo_f$sdev %>% 
+  as_tibble() %>% 
+  frac_var()%>%
+  mutate(Comp = colnames(pPCA_demo_f$x),
+         value = round(value*100, 1))%>%
+  mutate(name1 = paste0(Comp, "(", value, "%)"))%>%
+  pull(name1)
+
+df_pPCA_demo_f <- pPCA_demo_f$x %>%
+  as.data.frame() %>% #view()
+  dplyr::select(PC1, PC2, PC3)%>%
+  rownames_to_column(var = "Species") %>%
+  full_join(df_pcametadata, by = "Species")
+
+df_pPCA_demo_f_annot <- bind_rows(df_pPCA_demo_f%>%ungroup()%>%
+  slice_min(PC1, n = 5),
+  df_pPCA_demo_f%>%ungroup()%>%
+  slice_max(PC1, n = 5))
+
+biplot_pca_f<- ggplot(data = df_pPCA_demo_f, mapping = aes(x = PC1, y = PC2)) +
+  geom_point(size = 1.5, color = "grey50"
+             #aes(color = Broad_clade)
+             ) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_segment(
+    data = pPCA_demo_f$rotation %>% 
+      as.data.frame() %>% 
+      select(PC1, PC2) %>% rownames_to_column("Trait"),
+    mapping = aes(xend = 6*PC1, yend = 6*PC2),
+    x = 0,
+    y = 0,
+    arrow = arrow(),
+    linewidth = 0.8,
+    color = "darkred"
+  ) +
+  geom_label(
+    data = pPCA_demo_f$rotation %>% as.data.frame() %>% select(PC1, PC2) %>% rownames_to_column("Trait"),
+    mapping = aes(x = 6.5*PC1, y = 6.5*PC2, label = Trait),
+    size = 3,label.size = 0,
+    hjust = "outward",
+    vjust = 0.5,
+    color = "darkred"
+  ) +
+  scale_x_continuous(name = axisnames[1], limits = c(min(df_pPCA_demo_f$PC1)-0.9,max(df_pPCA_demo_f$PC1)+0.5))+
+  scale_y_continuous(name = axisnames[2],limits = c(min(df_pPCA_demo_f$PC2)-0.9,max(df_pPCA_demo_f$PC2)+1.5))+
+  scale_color_npg(name = "Group")+
+  theme_classic2() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.title = element_blank(),
+        axis.title = element_text(size = 10, face = "bold"),
+        plot.margin = margin(t = 20, r = 5, b = 5, l = 15, unit = "pt"))
+
+biplot_pca_f
+
+```
+
+
+## Male demographic pPCA
+
+```{r}
+#| warning: false
+
+male_demodata<- combo_phylo_demo_log$data %>%
+      dplyr::select(
+        ls90 = ls90_m,
+        e0 = e0_m,
+        ARM = repro_maturity_m,
+        beta = std_aging_rate_m,
+        H =H_m, 
+        G0 = G0_m, 
+        ls90 = ls90_m
+      ) %>%
+      scale()
+pPCA_demo_m<- as.prcomp(phyl.pca(
+  combo_phylo_demo_log$phy, 
+  Y = male_demodata,
+  mode="cov", scale = T, method = "lambda"))
+
+df_pcametadata<-df_species_metadata %>%filter(Species != "S_latifasciaeformis")
+
+frac_var <- function(x) x^2/sum(x^2)
+library(scales)
+
+axisnames<- pPCA_demo_m$sdev %>% 
+  as_tibble() %>% 
+  frac_var()%>%
+  mutate(Comp = colnames(pPCA_demo_m$x),
+         value = round(value*100, 1))%>%
+  mutate(name1 = paste0(Comp, "(", value, "%)"))%>%
+  pull(name1)
+
+df_pPCA_demo_m <- pPCA_demo_m$x %>%
+  as.data.frame() %>% #view()
+  dplyr::select(PC1, PC2, PC3)%>%
+  rownames_to_column(var = "Species") %>%
+  full_join(df_pcametadata, by = "Species")
+
+biplot_pca_m<- ggplot(data = df_pPCA_demo_m, mapping = aes(x = -PC1, y = PC2)) +
+  geom_point(size = 1.5,color = "grey50") +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_segment(
+    data = pPCA_demo_m$rotation %>% as.data.frame() %>% select(PC1, PC2) %>% rownames_to_column("Trait"),
+    mapping = aes(xend = -6*PC1, yend = 6*PC2),
+    x = 0,
+    y = 0,
+    arrow = arrow(),
+    linewidth = 0.8,
+    color = "darkred"
+  ) +
+  geom_label(
+    data = pPCA_demo_m$rotation %>% as.data.frame() %>% select(PC1, PC2) %>% rownames_to_column("Trait"),
+    mapping = aes(x = -6.5*PC1, y = 6.5*PC2, label = Trait),
+    size = 3,label.size = 0,
+    hjust = "outward",
+    vjust = 0.5,
+    color = "darkred"
+  ) +
+  # geom_label_repel(
+  #   mapping = aes(x = PC1, y = PC2, label = Species),
+  #   size = 1.5, 
+  #   max.overlaps = 20, force_pull = 1,force = 0.05,
+  #   fill = NA,
+  #   label.size = 0,
+  #   segment.color = NA
+  #   
+  # )+
+  scale_x_continuous(name = axisnames[1], limits = c(min(df_pPCA_demo_m$PC1)-0.9,max(df_pPCA_demo_m$PC1)+1.5))+
+  scale_y_continuous(name = axisnames[2],limits =  c(min(df_pPCA_demo_m$PC2)-0.9,max(df_pPCA_demo_m$PC2)+1.5))+
+  scale_color_npg(name = "Group")+
+  theme_classic2() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #legend.title = element_blank(),
+        axis.title = element_text(size = 10, face = "bold"),
+        plot.margin = margin(t = 20, r = 5, b = 5, l = 15, unit = "pt"))
+
+
+biplot_pca_m
+
+```
+
+
+
+
+## Species average demographic pPCA
+
+```{r}
+#| warning: false
+
+sa_demodata<- combo_phylo_demo_log$data %>%
+  rowwise()%>%
+  mutate(ARM = mean(repro_maturity_f, repro_maturity_m),
+         H = mean(H_f, H_m),
+         G0 = mean(G0_f, G0_m))%>%
+  ungroup()%>%
+      dplyr::select(
+        ls90 = ls90_sa,
+        e0 = e0_sa,
+        ARM,
+        beta = std_aging_rate_sa,
+        H, 
+        G0, 
+        #ls50 = ls50_sa
+      ) %>%
+      scale()
+pPCA_demo_sa<- as.prcomp(phyl.pca(
+  combo_phylo_demo_log$phy, 
+  Y = sa_demodata,
+  mode="cov", scale = T, method = "lambda"))
+
+
+frac_var <- function(x) x^2/sum(x^2)
+library(scales)
+
+axisnames<- pPCA_demo_sa$sdev %>% 
+  as_tibble() %>% 
+  frac_var()%>%
+  mutate(Comp = colnames(pPCA_demo_sa$x),
+         value = round(value*100, 1))%>%
+  mutate(name1 = paste0(Comp, "(", value, "%)"))%>%
+  pull(name1)
+
+df_pPCA_demo_sa <- pPCA_demo_sa$x %>%
+  as.data.frame() %>% #view()
+  dplyr::select(PC1, PC2, PC3)%>%
+  rownames_to_column(var = "Species") %>%
+  full_join(df_pcametadata, by = "Species")
+
+biplot_pca_sa<- ggplot(data = df_pPCA_demo_sa, mapping = aes(x = PC1, y = PC2)) +
+  geom_point(size = 1.5,color = "grey50") +
+  geom_vline(xintercept = 0, linetype = 2) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_segment(
+    data = pPCA_demo_sa$rotation %>% as.data.frame() %>% select(PC1, PC2) %>% rownames_to_column("Trait"),
+    mapping = aes(xend = 6*PC1, yend = 6*PC2),
+    x = 0,
+    y = 0,
+    arrow = arrow(),
+    linewidth = 0.8,
+    color = "darkred"
+  ) +
+  geom_label(
+    data = pPCA_demo_sa$rotation %>% as.data.frame() %>% select(PC1, PC2) %>% rownames_to_column("Trait"),
+    mapping = aes(x = 6.5*PC1, y = 6.5*PC2, label = Trait),
+    size = 3,label.size = 0,
+    hjust = "outward",
+    vjust = 0.5,
+    color = "darkred"
+  ) +
+  scale_x_continuous(name = axisnames[1], limits = c(min(df_pPCA_demo_m$PC1)-0.9,max(df_pPCA_demo_m$PC1)+1.5))+
+  scale_y_continuous(name = axisnames[2],limits =  c(min(df_pPCA_demo_m$PC2)-0.9,max(df_pPCA_demo_m$PC2)+1.5))+
+  scale_color_npg(name = "Group")+
+  theme_classic2() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #legend.title = element_blank(),
+        axis.title = element_text(size = 10, face = "bold"),
+        plot.margin = margin(t = 20, r = 5, b = 5, l = 15, unit = "pt"))
+
+
+biplot_pca_sa
+
+```
+
+
+
+## Make full plot
+```{r}
+#| fig-height: 11
+#| fig-width: 6
+ggarrange(plotlist = list(biplot_pca_sa, biplot_pca_f,  biplot_pca_m), nrow = 3,  labels = c("a. Species", "b. Female", "c. Male"), label.y = 1, font.label = list(size = 10), label.x = 0 )
+
+```
+
+
+
+
+
+# Check allometric relationships
+
+## Present inter-sex correlations
+
+```{r}
+
+tempdata<-  df_non_demo_data%>%
+  as.data.frame()%>%
+  filter(Species != "S_latifasciaeformis")%>%
+  select(Species, tot.dry.mass.f, tot.dry.mass.m)%>%
+  mutate(
+    `log female dry mass (mg)` = log(tot.dry.mass.f),
+    `log male dry mass (mg)` = log(tot.dry.mass.m)
+  )
+caper_m_f_dry_mass <- comparative.data(
+  phy = combo_phylo_demo_log$phy, data = tempdata, names.col = Species, vcv = T, vcv.dim = 3
+                                       )
+pgls.drymass <- pgls(`log female dry mass (mg)` ~ `log male dry mass (mg)`, data = caper_m_f_dry_mass, lambda = "ML" )%>%summary
+pgls.drymass
+
+X1 = caper_m_f_dry_mass$data%>%select( `log male dry mass (mg)`, `log female dry mass (mg)`)
+obj1<- phylomorphospace(combo_phylo_demo_log$phy, X = X1)
+df1<-data.frame(
+  xstart=obj1$xx[obj1$edge[,1]],
+  ystart=obj1$yy[obj1$edge[,1]],
+  xstop=obj1$xx[obj1$edge[,2]],
+  ystop=obj1$yy[obj1$edge[,2]],
+  nodestart=obj1$edge[,1],
+  nodestop=obj1$edge[,2])
+ggplot()+
+  #geom_point(data=df1%>%filter(nodestop > 148 ), aes(x=xstop,y=ystop),color = "darkgrey", size=1.5 )+
+  geom_point(data=X1,aes(y = `log female dry mass (mg)`,x=`log male dry mass (mg)`),color = "black", size=1.5)+
+  scale_x_continuous("log male dry mass (mg)")+
+  scale_y_continuous("log female dry mass (mg)")+
+  
+  geom_segment(data=df1,aes(x=xstart,y=ystart,xend=xstop,yend=ystop), size = 0.1,color="black")+
+  geom_abline(slope =  0.839816, intercept = 0.182938, color = "darkred")+
+  geom_abline(slope = 1, intercept = -0.05, linetype = "dashed", color = "grey")+
+  theme_classic2(base_size = 10)+
+  theme(axis.title = element_text(face = "bold"))
+
+```
+
+
+### Make data
+
+```{r}
+
+fun_phylomorphospace <- function(data, col_name) {
+  X1 = data %>% select(dry_mass, {{ col_name }}, Broad_clade)
+  obj1 <- phylomorphospace(combo_phylo_demo_log$phy, X = X1 %>% select(-c(Broad_clade)))
+  df1 <- data.frame(
+    xstart = obj1$xx[obj1$edge[, 1]],
+    ystart = obj1$yy[obj1$edge[, 1]],
+    xstop = obj1$xx[obj1$edge[, 2]],
+    ystop = obj1$yy[obj1$edge[, 2]],
+    nodestart = obj1$edge[, 1],
+    nodestop = obj1$edge[, 2]
+  )
+  p <- ggplot() + 
+    geom_point(data = X1, aes(x = dry_mass, y = {{ col_name }}), size =
+                 1, color = "grey50") +
+    geom_smooth(data = X1, aes(x = dry_mass, y = {{ col_name }}), method = "lm", color = "black")+
+    scale_x_continuous("log(dry mass)") +
+    #scale_color_npg(name = "")+
+    #geom_segment(data=df1,aes(x=xstart,y=ystart,xend=xstop,yend=ystop), size = 0.1,color="black")+
+    theme_classic2(base_size = 10)
+  return(p)
+}
+df_allometry_f<- combo_phylo_demo_log$data %>%
+    dplyr::select(
+    ls90 = ls90_f,
+    e0 = e0_f,
+    beta = std_aging_rate_f,
+    H = H_f, 
+    G0 = G0_f,
+    ARM = repro_maturity_f
+  ) %>%
+  rownames_to_column("Species")%>%
+  left_join(df_species_metadata%>%select(Species,Broad_clade), by = "Species")%>%
+  left_join(df_pPCA_demo_f%>%select(Species, PC1, PC2), by = "Species")%>%
+  left_join(df_non_demo_data%>% select(Species, tot.dry.mass.f)%>% mutate(dry_mass = log(tot.dry.mass.f)))%>%
+  column_to_rownames("Species")
+
+
+p_allo_f <- ggarrange(  
+  fun_phylomorphospace(df_allometry_f,H), 
+  fun_phylomorphospace(df_allometry_f,G0),
+  fun_phylomorphospace(df_allometry_f,beta),
+  fun_phylomorphospace(df_allometry_f,e0),
+  fun_phylomorphospace(df_allometry_f, ls90),
+  fun_phylomorphospace(df_allometry_f,ARM),
+  ncol = 3, nrow = 2) 
+
+
+
+df_allometry_m<- combo_phylo_demo_log$data %>%
+    dplyr::select(
+    ls90 = ls90_m,
+    e0 = e0_m,
+    beta = std_aging_rate_m,
+    H = H_m, 
+    G0 = G0_m,
+    ARM = repro_maturity_m
+  ) %>%
+  rownames_to_column("Species")%>%
+  left_join(df_species_metadata%>%select(Species,Broad_clade), by = "Species")%>%
+  left_join(df_non_demo_data%>% select(Species, tot.dry.mass.m)%>% mutate(dry_mass = log(tot.dry.mass.m)))%>%
+  column_to_rownames("Species")
+
+
+p_allo_m <- ggarrange(  
+  fun_phylomorphospace(df_allometry_m,H), 
+  fun_phylomorphospace(df_allometry_m,G0),
+  fun_phylomorphospace(df_allometry_m,beta),
+  fun_phylomorphospace(df_allometry_m,e0),
+  fun_phylomorphospace(df_allometry_m, ls90),
+  fun_phylomorphospace(df_allometry_m,ARM),
+  ncol = 3, nrow = 2) 
+
+ggarrange(ggarrange(  
+  fun_phylomorphospace(df_allometry_f,H), 
+  fun_phylomorphospace(df_allometry_f,G0),
+  fun_phylomorphospace(df_allometry_f,beta),
+  fun_phylomorphospace(df_allometry_f,e0),
+  fun_phylomorphospace(df_allometry_f, ls90),
+  fun_phylomorphospace(df_allometry_f,ARM),
+  ncol = 3, nrow = 2,common.legend = T, legend = "bottom") ,
+  ggarrange(  
+  fun_phylomorphospace(df_allometry_m,H), 
+  fun_phylomorphospace(df_allometry_m,G0),
+  fun_phylomorphospace(df_allometry_m,beta),
+  fun_phylomorphospace(df_allometry_m,e0),
+  fun_phylomorphospace(df_allometry_m, ls90),
+  fun_phylomorphospace(df_allometry_m,ARM),
+  ncol = 3, nrow = 2,common.legend = T, legend = "bottom"),
+  ncol = 1, nrow = 2, common.legend = T, legend = "bottom", labels = c("A  Female", "B   Male"))
+```
+
+## Run PGLS
+
+
+```{r}
+
+caper_allometry_f <- comparative.data(phy = combo_phylo_demo_log$phy, data = df_allometry_f%>% select(-c(Broad_clade,tot.dry.mass.f,PC1,PC2))%>% rownames_to_column("Species"), names.col = Species)
+# ----------------------------------------------------------------
+df_allo_fit_f<- data.frame()
+for(i in colnames(caper_allometry_f$data)[-7]){
+  model_formula <- as.formula(paste0(i," ~ dry_mass"))
+  print(model_formula)
+  pgls_model <- pgls(model_formula, data = caper_allometry_f, lambda = "ML")
+
+model_summary <- summary(pgls_model)
+
+df_allo_fit_f<- bind_rows(df_allo_fit_f, bind_cols( adj.r.squared = model_summary$adj.r.squared, P = model_summary$coefficients["dry_mass", "Pr(>|t|)"]%>%round(3), slope = model_summary$coefficients ["dry_mass", "Estimate" ] )%>% mutate(Trait = i))
+}
+df_allo_fit_f%>%clipr::write_clip()
+
+
+caper_allometry_m <- comparative.data(phy = combo_phylo_demo_log$phy, data = df_allometry_m%>% select(-c(Broad_clade,tot.dry.mass.m))%>% rownames_to_column("Species"), names.col = Species)
+# ----------------------------------------------------------------
+df_allo_fit_m<- data.frame()
+for(i in colnames(caper_allometry_m$data)[-7]){
+  model_formula <- as.formula(paste0(i," ~ dry_mass"))
+  print(model_formula)
+  pgls_model <- pgls(model_formula, data = caper_allometry_m, lambda = "ML")
+
+model_summary <- summary(pgls_model)
+
+df_allo_fit_m<- bind_rows(df_allo_fit_m, bind_cols( adj.r.squared = model_summary$adj.r.squared, P = model_summary$coefficients["dry_mass", "Pr(>|t|)"]%>%round(10), slope = model_summary$coefficients ["dry_mass", "Estimate" ] )%>% mutate(Trait = i))
+}
+df_allo_fit_m%>%clipr::write_clip()
+
+```
+
+## Metabolic rate allometry
+
+```{r}
+metab_data <- read_excel("~/Projects/Longevity_fecundity/data/Metab_rate_messamah_2017.xlsx", sheet = "Combined")
+
+combo_phylo_metab_m <- match.phylo.data(phy = combo_phylo_demo_log$phy,
+                                      data = inner_join(df_allometry_m %>% rownames_to_column("Species"), metab_data, by = "Species")%>% select(-c(Broad_clade, tot.dry.mass.m, SMR_f))%>% column_to_rownames("Species"))
+
+
+caper_metab_m <- comparative.data(phy = combo_phylo_metab_m$phy, data = combo_phylo_metab_m$data%>% rownames_to_column("Species"), names.col = Species)
+
+df_metab_fit_m<- data.frame()
+for(i in colnames(caper_metab_m$data)[-8]){
+  model_formula <- as.formula(paste0(i," ~ log(SMR_m)"))
+  print(model_formula)
+  pgls_model <- pgls(model_formula, data = caper_metab_m, lambda = "ML")
+
+model_summary <- summary(pgls_model)
+
+df_metab_fit_m<- bind_rows(df_metab_fit_m, bind_cols( adj.r.squared = model_summary$adj.r.squared, P = model_summary$coefficients["log(SMR_m)", "Pr(>|t|)"]%>%round(10), slope = model_summary$coefficients ["log(SMR_m)", "Estimate" ] )%>% mutate(Trait = i))
+}
+df_metab_fit_m
+
+
+
+
+combo_phylo_metab_f <- match.phylo.data(phy = combo_phylo_demo_log$phy,
+                                      data = inner_join(df_allometry_f %>% rownames_to_column("Species"), metab_data, by = "Species")%>% select(-c(Broad_clade, tot.dry.mass.f, SMR_m, PC1, PC2))%>% column_to_rownames("Species"))
+
+
+caper_metab_f <- comparative.data(phy = combo_phylo_metab_f$phy, data = combo_phylo_metab_f$data%>% rownames_to_column("Species"), names.col = Species)
+
+df_metab_fit_f<- data.frame()
+for(i in colnames(caper_metab_f$data)[-8]){
+  model_formula <- as.formula(paste0(i," ~ SMR_f"))
+  print(model_formula)
+  pgls_model <- pgls(model_formula, data = caper_metab_f, lambda = "ML")
+
+model_summary <- summary(pgls_model)
+
+df_metab_fit_f<- bind_rows(df_metab_fit_f, bind_cols( adj.r.squared = model_summary$adj.r.squared, P = model_summary$coefficients["SMR_f", "Pr(>|t|)"]%>%round(10), slope = model_summary$coefficients ["SMR_f", "Estimate" ] )%>% mutate(Trait = i))
+}
+df_metab_fit_m$slope%>%clipr::write_clip()
+
+
+
+
+### Metabolic rate and body size 
+### 
+
+caper_metab_thl <- comparative.data(
+  data = inner_join(
+    combo_phylo_full$data%>%
+      filter(rownames(.)%in% rownames(combo_phylo_metab_f$data))%>% 
+      dplyr::select(th.len.f, th.len.m)%>%rownames_to_column("Species"),
+    metab_data, 
+    by = "Species"),
+  phy = combo_phylo_metab_f$phy, vcv = T, vcv.dim = 3, names.col = "Species")
+
+pgls(log(th.len.m) ~ log(SMR_m), data = caper_metab_thl, lambda = "ML" )%>%summary()
+
+```
+
+
+# Does female gametic/somatic investment (ovariole.no,egg.vol, th.vol.f, sr.le) relate to pace/shape of demography using phylo.integration.
+Do it with +/- SR length
+
+## pPLS
+
+```{r}
+array_lifespan_f <- combo_phylo_demo_log$data%>%
+  select(
+    ls90 = ls90_f,
+    ARM = repro_maturity_f,
+    e0 = e0_f
+  )%>%
+  rownames_to_column("Species")%>%
+  left_join(df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, tot.dry.mass.f)#%>%
+              )%>%
+  column_to_rownames("Species")%>%scale()
+
+array_aging_f<- combo_phylo_demo_log$data%>%
+  select(
+    beta = std_aging_rate_f,
+    H = H_f,
+    G0 = G0_f
+  )%>%
+  rownames_to_column("Species")%>%
+  left_join(df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, tot.dry.mass.f)#%>%
+              )%>%
+  column_to_rownames("Species")%>%
+  scale()
+
+array_repro_f <- combo_phylo_demo_log$data%>%
+  select(R0,
+         #Fmax
+         )%>%
+  rownames_to_column("Species")%>%
+  left_join(df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, ovariole.no, egg.vol,sr.len)#%>%
+              )%>%
+  column_to_rownames("Species")%>%scale()
+  
+  
+
+
+
+pi.lifespan.f<- phylo.integration( A =array_repro_f, A2 = array_lifespan_f,  phy =combo_phylo_demo_log$phy, iter = 10000,  seed = 111, print.progress = T  )
+summary(pi.lifespan.f)
+pi.lifespan.f$left.pls.vectors
+pi.lifespan.f$right.pls.vectors
+pi.aging.f<- phylo.integration( A =array_repro_f, A2 = array_aging_f,  phy =combo_phylo_demo_log$phy, iter = 10000,  seed = 111, print.progress = T  )
+summary(pi.aging.f) # Test summary
+pi.aging.f$left.pls.vectors
+pi.aging.f$right.pls.vectors
+
+
+array_repro_f2 <- combo_phylo_demo_log$data%>%
+  select(R0,
+         Fmax
+         )%>%
+  rownames_to_column("Species")%>%
+  left_join(df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, ovariole.no, egg.vol,sr.len)#%>%
+              )%>%
+  column_to_rownames("Species")%>%scale()
+
+array_repro_senesc <- combo_phylo_demo_log$data%>%select(Sen_rep, Sh_rep)
+pi.repro.aging<- phylo.integration( A =array_repro_f2, A2 = array_repro_senesc,  phy =combo_phylo_demo_log$phy, iter = 10000,  seed = 111, print.progress = T  )
+summary(pi.repro.aging)
+pi.repro.aging$left.pls.vectors
+pi.repro.aging$right.pls.vectors
+
+```
+### Plot
+```{r}
+
+p_pls_lifespan_f<- bind_cols( Lifespan = pi.lifespan$YScores [,1], Repro.invest = pi.lifespan$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  left_join(df_pcametadata)%>%
+  ggplot(aes(x = Repro.invest, y = Lifespan ))+
+  geom_point()+
+  scale_x_continuous("Reproductive investment index")+
+  scale_y_continuous("Female lifespan index")+
+  #geom_label_repel(aes(label = Species))+
+  geom_smooth(method = "lm", se = F, color = "black")+
+  #scale_color_manual(values = colorscheme_9)+
+  theme_classic2(base_size = 12 )+
+  theme(axis.title = element_text(face = "bold"))
+
+
+p_pls_aging_f<- bind_cols( Aging = pi.aging$YScores [,1], Repro.invest = pi.aging$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  left_join(df_pcametadata)%>%
+  ggplot(aes(x = Repro.invest, y = Aging ))+
+  geom_point()+
+  scale_x_continuous("Reproductive investment index")+
+  scale_y_continuous("Female aging index")+
+  #geom_label_repel(aes(label = Species))+
+  geom_smooth(method = "lm", se = F, color = "black")+
+  #scale_color_manual(values = colorscheme_9)+
+  theme_classic2(base_size = 12 )+
+  theme(axis.title = element_text(face = "bold"))
+
+
+p_pls_repro_aging_f<- bind_cols( Aging = pi.repro.aging$YScores [,1], Repro.invest = pi.aging$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  left_join(df_pcametadata)%>%
+  ggplot(aes(x = Repro.invest, y = Aging ))+
+  geom_point()+
+  scale_x_continuous("Reproductive investment")+
+  scale_y_continuous("Female reproductive\nsenescence index")+
+  #geom_label_repel(aes(label = Species))+
+  geom_smooth(method = "lm", se = F, color = "black")+
+  #scale_color_manual(values = colorscheme_9)+
+  theme_classic2(base_size = 12 )+
+  theme(axis.title = element_text(face = "bold"))
+
+
+ggarrange(p_pls_lifespan_f,p_pls_aging_f,p_pls_repro_aging_f, nrow =3, labels = "auto" )
+
+# thoracic_inv_f <- combo_phylo_full$data%>%
+#   select(resid.th.vol.f)
+# 
+# pi3<- phylo.integration(A = thoracic_inv_f, A2 = array_PC1, phy =combo_phylo_full$phy, seed = 111, print.progress = F)
+# summary(pi3)
+# 
+# cbind(shape = pi3$YScores, combined_repro = pi3$XScores)%>%
+#   as.data.frame()%>%
+#   rownames_to_column("Species")%>%
+#   rowwise()%>%
+#   mutate(Lifespan.params = V1,
+#          Thoracic.inv = V2)%>% #
+#   select(Species, Lifespan.params, Thoracic.inv)%>%#view()
+#   left_join(df_pcametadata)%>%
+#   ggplot(aes(x = Thoracic.inv, y = Lifespan.params ))+
+#   geom_point(aes(color = Broad_clade))+
+#   geom_label_repel(aes(label = Species))+
+#   geom_smooth(method = "lm", se = F, color = "black")+
+#   scale_color_manual(values = colorscheme_9)+
+#   theme_classic()
+#   
+
+```
+
+
+## Does male reproductive investment (residual ag area,residualtestis mass, sperm per cop) relate to pace/shape of demography using phylo.integration.
+### Analysis
+```{r}
+array_lifespan_m <- combo_phylo_demo_log$data%>%
+  select(
+    ls90 = ls90_f,
+    ARM = repro_maturity_f,
+    e0 = e0_f
+  )%>%
+  rownames_to_column("Species")%>%
+  left_join(df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, tot.dry.mass.m)#%>%
+              )%>%
+  column_to_rownames("Species")%>%scale()
+
+array_aging_m<- combo_phylo_demo_log$data%>%
+  select(
+    beta = std_aging_rate_m,
+    H = H_m,
+    G0 = G0_m
+  )%>%
+  rownames_to_column("Species")%>%
+  left_join(df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, tot.dry.mass.m)#%>%
+              )%>%
+  column_to_rownames("Species")%>%
+  scale()
+
+array_repro_m <- df_non_demo_data%>%
+              filter(Species != "S_latifasciaeformis")%>%
+              select(Species, resid.agland.area, resid.testis.mass, sp.total.len, resid.eb.area, sperm.per.cop)%>%
+  mutate(sp.total.len = log(sp.total.len))%>%
+  column_to_rownames("Species")%>%scale()
+
+
+pi.lifespan.m<- phylo.integration( A =array_repro_m, A2 = array_lifespan_m,  phy =combo_phylo_demo_log$phy, iter = 10000,  seed = 111, print.progress = T  )
+summary(pi.lifespan.m)
+pi.lifespan.m$left.pls.vectors
+pi.lifespan.m$right.pls.vectors
+pi.aging.m<- phylo.integration( A =array_repro_m, A2 = array_aging_m,  phy =combo_phylo_demo_log$phy, iter = 10000,  seed = 111, print.progress = T  )
+summary(pi.aging.m) # Test summary
+pi.aging.m$left.pls.vectors
+pi.aging.m$right.pls.vectors
+
+
+
+
+
+
+# inner_join(combo_phylo_demo_log$data%>%
+#   select(R0,Fmax)%>%
+#   rownames_to_column("Species")%>%
+#   left_join(df_non_demo_data%>%
+#               filter(Species != "S_latifasciaeformis")%>%
+#               select(Species, ovariole.no, egg.vol)#%>%
+#               ),
+#   df_non_demo_data%>%
+#               filter(Species != "S_latifasciaeformis")%>%
+#               select(Species, resid.agland.area, resid.testis.mass, resid.eb.area, sperm.per.cop), by = "Species")->repro.invest
+# 
+# save(repro.invest, file = "../data/repro.invest.Rdata")
+# combo_phylo_demo_log$data%>%select(e0_f, e0_m, e0_sd )-> ale
+# save(ale, file = "../data/adult_life_expectancy.Rdata")
+# rm(ale, repro.invest)
+```
+### Plot
+```{r}
+p_pls_lifespan_m<- bind_cols( Lifespan = pi.lifespan.m$YScores [,1], Repro.invest = pi.lifespan.m$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  left_join(df_pcametadata)%>%
+  ggplot(aes(x = Repro.invest, y = Lifespan ))+
+  geom_point()+
+  scale_x_continuous("Reproductive investment index")+
+  scale_y_continuous("Male lifespan index")+
+  #geom_label_repel(aes(label = Species))+
+  geom_smooth(method = "lm", se = F, color = "black")+
+  #scale_color_manual(values = colorscheme_9)+
+  theme_classic2(base_size = 10 )+
+  theme(axis.title = element_text(face = "bold"))
+
+p_pls_lifespan_m
+
+
+p_pls_aging_m <- bind_cols( Aging = pi.aging.m$YScores [,1], Repro.invest = pi.aging.m$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  left_join(df_pcametadata)%>%
+  ggplot(aes(x = Repro.invest, y = Aging ))+
+  geom_point(size = 0.2)+
+  scale_x_continuous("Reproductive investment index")+
+  scale_y_continuous("Male aging index")+
+  #geom_label_repel(aes(label = Species))+
+  geom_smooth(method = "lm", se = F, color = "black", linewidth = 0.5)+
+  #scale_color_manual(values = colorscheme_9)+
+  theme_classic2(base_size = 10 )+
+  theme(axis.title = element_text(face = "bold"))
+ggarrange(p_pls_lifespan_f, p_pls_aging_f, p_pls_repro_aging_f,
+  p_pls_lifespan_m, p_pls_aging_m, nrow = 2, ncol = 3, labels = "AUTO", align = "hv")
+ggarrange(p_pls_lifespan_f, p_pls_aging_f, p_pls_lifespan_m, p_pls_aging_m, nrow = 2, ncol = 2, #labels = "AUTO", 
+          align = "hv")
+
+p_pls_aging_m
+
+```
+## Combine male and female for final plot
+
+```{r}
+#| fig-height: 4
+#| fig-width: 10
+df1_agingplot_sexpool <- bind_cols( Aging = pi.aging.m$YScores [,1], Repro.invest = pi.aging.m$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  mutate(Sex = "Male")%>%
+  bind_rows(bind_cols( Aging = pi.aging.f$YScores [,1], Repro.invest = pi.aging.f$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  mutate(Sex = "Female"))
+
+
+
+df1_lifespanplot_sexpool <- bind_cols( Lifespan = pi.lifespan.m$YScores [,1], Repro.invest = pi.lifespan.m$XScores[,1] )%>%
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  mutate(Sex = "Male")%>%
+  bind_rows(bind_cols( Lifespan = pi.lifespan.f$YScores [,1], Repro.invest = pi.lifespan.f$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  mutate(Sex = "Female"))
+
+
+
+
+p_comb_lifespan <- df1_lifespanplot_sexpool%>%
+  ggplot(aes(x = Repro.invest, y = Lifespan, shape = Sex, color = Sex ))+
+  geom_point(size = 1.2)+
+  scale_x_continuous(" ")+
+  scale_y_continuous("Pace of life\nindex")+
+  geom_smooth(method = "lm", se = F,  linewidth = 0.5)+
+  scale_color_npg()+
+  theme_classic2(base_size = 12 )+
+  theme(axis.title = element_text(face = "bold"),
+        plot.margin = margin(t = 20, r = 20, b = 20, l = 20, unit = "pt"))
+
+p_comb_aging <- df1_agingplot_sexpool%>%
+  ggplot(aes(x = Repro.invest, y = Aging, shape = Sex, color = Sex ))+
+  geom_point(size = 1.2)+
+  scale_x_continuous("Reproductive investment index")+
+  scale_y_continuous("Shape of mortality\nindex")+
+  geom_smooth(method = "lm", se = F,  linewidth = 0.5)+
+  scale_color_npg()+
+  theme_classic2(base_size = 12 )+
+  theme(axis.title = element_text(face = "bold"),
+        plot.margin = margin(t = 20, r = 20, b = 20, l = 20, unit = "pt"))
+
+
+p_repro_aging_f<- bind_cols( Aging = pi.repro.aging$YScores [,1], Repro.invest = pi.repro.aging$XScores[,1] )%>%#view()
+  as.data.frame()%>%#view()
+  rownames_to_column("Species")%>%
+  mutate(Sex = "Female")%>%
+  ggplot(aes(x = Repro.invest, y = Aging, shape = Sex, color = Sex ))+
+  geom_point(size = 1.2)+
+  scale_x_continuous(" ")+
+  scale_y_continuous("Reproductive senescence\nindex")+
+  geom_smooth(method = "lm", se = F,  linewidth = 0.5)+
+  scale_color_npg()+
+  theme_classic2(base_size = 12 )+
+  theme(axis.title = element_text(face = "bold"),
+        plot.margin = margin(t = 20, r = 20, b = 20, l = 20, unit = "pt"))
+
+
+ggarrange(p_comb_lifespan,p_comb_aging,p_repro_aging_f, ncol =3, labels = "auto",widths = c(1,1,1.1), common.legend = T, legend = "bottom" )
+
+#p_comb_lifespan
+
+
+
+```
+
+
+
+## Bivariate using pgls
+
+### Make caper data
+```{r}
+multi_inner_join <- function(dataframes, by){
+  reduce(dataframes, inner_join, by = by)
+}
+
+df_combined <- list(
+  df_species_metadata %>%
+    dplyr::select(Species, Broad_clade),
+  combo_phylo_demo_log$data %>%
+    rownames_to_column("Species")%>%
+    mutate(across(starts_with("e0_"),.fns = ~ exp(.))),
+  #df_pPCA_demo_m%>%select(Species, shape_m = PC1, pace_m =PC2),
+  #df_pPCA_demo_f%>%select(Species, shape_f = PC1, pace_f =PC2),
+  df_non_demo_data
+) %>%
+  multi_inner_join(by = "Species")%>%
+  dplyr::select(-ends_with("_se"))
+
+# combine with tree
+combo_phylo_full <- match.phylo.data(
+  phy = combo_phylo_demo_log$phy, 
+  data = df_combined%>%
+    select(-c(Broad_clade))%>%
+    column_to_rownames("Species"))
+combo_phylo_full$data<- combo_phylo_full$data%>%
+  mutate(across(where(is.character), ~ as.numeric(.)))
+# maker comparative for pgls
+caper_full <- comparative.data(
+  phy = combo_phylo_full$phy,
+  data = combo_phylo_full$data %>%
+    # mutate(repro_maturity_f = factor(repro_maturity_f),
+    #        repro_maturity_m = factor(repro_maturity_m))%>%
+    rownames_to_column("Species"),
+  names.col = "Species",
+  vcv = T,na.omit = F,
+  vcv.dim = 3,
+  warn.dropped = T
+)
+
+
+
+```
+
+### Plotting fun
+```{r}
+fun_phylomorphospace2 <- function(caperData, col_name1, col_name2, slope1, intercept1,slope_repl,intercept_repl ){
+  X1 = caperData$data %>%
+    rownames_to_column("Species") %>%
+    left_join(df_pcametadata %>%
+                select(Species, Broad_clade), by = "Species") %>%
+    mutate({{ col_name1 }} := log({{ col_name1 }}), Clade = case_when(Broad_clade == "Repleta" ~ "Repleta", .default =  NA)) %>%
+    
+    select({{ col_name1 }}, {{ col_name2 }}, Clade)
+    
+#   obj1<- phylomorphospace(caperData$phy, X = X1)
+#   df1<-data.frame(
+# 	xstart=obj1$xx[obj1$edge[,1]],
+# 	ystart=obj1$yy[obj1$edge[,1]],
+# 	xstop=obj1$xx[obj1$edge[,2]],
+# 	ystop=obj1$yy[obj1$edge[,2]],
+# 	nodestart=obj1$edge[,1],
+# 	nodestop=obj1$edge[,2])
+  p<- ggplot(data=X1,aes(x = ({{ col_name1 }}),y=({{ col_name2 }}), color = Clade ))+
+    geom_point(size=1)+
+    geom_abline(slope = slope1, intercept = intercept1,
+                color = "black",
+                linewidth = 0.8)+
+    geom_abline(slope = slope_repl, intercept = intercept_repl,
+                color = "#DC0000FF",
+                linewidth = 0.8)+
+    scale_color_npg(name = "",na.value = "grey50" )+
+    #geom_segment(data=df1,aes(x=xstart,y=ystart,xend=xstop,yend=ystop), size = 0.1,color="black")+
+    theme_classic2(base_size = 12 )+
+    theme(axis.title = element_text(face = "bold"))
+  return(p)
+}
+
+```
+
+### Female PGLS
+```{r}
+
+# make caperdata
+pgls_e0_female_repro<- pgls(e0_f ~  Fmax +R0+log(tot.dry.mass.f) , data = caper_full, lambda = "ML")
+anova(pgls_e0_female_repro)
+summary(pgls_e0_female_repro)
+
+pgls_ls50_female_repro<- pgls(ls50_f ~  log(Rm) +log(net_repro) + log(ovariole.no ) + log(egg.vol)+log(tot.dry.mass.f)  , data = caper_full, lambda = "ML") #Rm = mean daily reproduction
+anova(pgls_ls50_female_repro)
+summary(pgls_ls50_female_repro)
+
+pgls_ls90_female_repro<- pgls(ls90_f ~  log(Rm) +log(net_repro) + log(ovariole.no ) + log(egg.vol) +log(tot.dry.mass.f)  , data = caper_full, lambda = "ML") #Rm = mean daily reproduction
+anova(pgls_ls90_female_repro)
+summary(pgls_ls90_female_repro)
+
+pgls_beta_female_repro<- pgls(std_aging_rate_f ~  Rm +log(net_repro) + log(ovariole.no ) + log(egg.vol) +log(tot.dry.mass.f)  , data = caper_full, lambda = "ML") #Rm = mean daily reproduction
+anova(pgls_beta_female_repro)
+summary(pgls_beta_female_repro)
+
+fun_phylomorphospace2(col_name1 = Rm, col_name2 = expectancy_f, slope1 = -1.0000e+00, intercept1 = 5+3.4129e-07)+labs(x = "log Sperm length (mm)", y = "log Male life expectancy (days)")+
+  theme(legend.position = "none")
+caper_full$data$ovariole.no
+
+pgls_e0_female_repro<- pgls(pace_m ~  Fmax +R0+log(tot.dry.mass.f) , data = caper_full, lambda = "ML")
+anova(pgls_e0_female_repro)
+summary(pgls_e0_female_repro)
+
+```
+## Ornament/preference correlation with lifespan/aging
+### male SS pgls
+
+```{r}
+pgls_e0_male_ss<- pgls((e0_m) ~ log(sp.total.len)   , data = caper_full, lambda = "ML")
+#anova(pgls_e0_male_ss)
+summary(pgls_e0_male_ss)
+
+
+
+pgls_ls90_male_ss<- pgls(ls90_m ~  log(tot.dry.mass.m) +log(sp.total.len)  , data = caper_full, lambda = "ML") 
+summary(pgls_ls90_male_ss)
+
+pgls_beta_male_ss<- pgls(std_aging_rate_m ~   log(sp.total.len) , data = caper_full, lambda = "ML") 
+summary(pgls_beta_male_ss)
+
+pgls_H_male_ss<- pgls(H_m ~  log(tot.dry.mass.m) +log(sp.total.len) , data = caper_full, lambda = "ML") 
+anova(pgls_H_male_ss)
+summary(pgls_H_male_ss)
+```
+
+
+
+
+
+### female SS pgls
+
+```{r}
+
+# make caperdata
+pgls_e0_female_ss<- pgls(e0_f ~   log(sr.len) , data = caper_full, lambda = "ML") #sp.sotrage_bin = sperm storage location, SR only or SR + spermathecae
+#anova(pgls_e0_female_ss, test = "Cp")
+summary(pgls_e0_female_ss)
+
+pgls_ls50_female_ss<- pgls(ls50_f ~  log(tot.dry.mass.f)  +log(sr.len)  , data = caper_full, lambda = "ML") #
+#anova(pgls_ls50_female_ss)
+summary(pgls_ls50_female_ss)
+
+pgls_ls90_female_ss<- pgls(ls90_f ~  log(tot.dry.mass.f)  +log(sr.len)  , data = caper_full, lambda = "ML") 
+#anova(pgls_ls90_female_ss)
+summary(pgls_ls90_female_ss)
+
+pgls_beta_female_ss<- pgls(std_aging_rate_f ~  log(tot.dry.mass.f)  +log(sr.len) , data = caper_full, lambda = "ML") 
+#anova(pgls_beta_female_ss)
+summary(pgls_beta_female_ss)
+pgls((std_aging_rate_f) ~  resid.th.vol.f , data = caper_full, lambda = "ML")%>%summary()
+# pgls_ls50_spl<- pgls(expectancy_f ~ log(ovariole.no )+ log(egg.vol) + , data = caper_full, lambda = "ML")
+# summary(pgls_e0_spl) 
+caper_full$data$resid.th.vol.m
+
+pgls_H_female_ss<- pgls(H_f ~  log(tot.dry.mass.f) +log(sr.len) , data = caper_full, lambda = "ML") #Rm = mean daily reproduction
+anova(pgls_H_female_ss)
+summary(pgls_H_female_ss)
+
+```
+
+
+
+
+
+### Only repleta species
+
+#### Make caper data
+
+```{r}
+combo_phylo_repleta <- match.phylo.data(phy = combo_phylo_full$phy, 
+                                           data = df_combined%>%
+                                             filter(Broad_clade %in% c( "Repleta"))%>%
+                                             select(-c(Broad_clade))%>%
+                                             ungroup()%>%
+                                             filter(sp.total.len>0 )%>%
+                                             column_to_rownames("Species"))
+combo_phylo_repleta$data<- combo_phylo_repleta$data%>%
+  mutate(across(where(is.character), ~ as.numeric(.)))
+
+
+caper_repleta <- comparative.data(phy = combo_phylo_repleta$phy,
+                                           data = combo_phylo_repleta$data%>% rownames_to_column("Species"),
+                                           names.col = Species, vcv = T, vcv.dim = 3, na.omit = F,
+                                           warn.dropped = T
+                                           )
+
+```
+
+
+#### Males
+
+```{r}
+
+pgls_e0_male_long_sp<- pgls((e0_m) ~   log(sp.total.len)  , data = caper_repleta, lambda = "ML")
+summary(pgls_e0_male_long_sp)
+
+pgls_beta_male_long_sp<- pgls(std_aging_rate_m ~   log(sp.total.len) , data = caper_repleta, ) 
+summary(pgls_beta_male_long_sp)
+
+pgls_H_male_long_sp<- pgls(H_m ~  log(tot.dry.mass.m) + log(sp.total.len) , data = caper_repleta, lambda = "ML") 
+summary(pgls_H_male_long_sp)
+
+```
+
+
+#### Females
+
+```{r}
+pgls_e0_female_long_sp<- pgls(e0_f ~  log(sr.len)   , data = caper_repleta, lambda = "ML")
+summary(pgls_e0_female_long_sp)
+
+pgls_beta_female_long_sp<- pgls(std_aging_rate_f ~  log(sr.len) , data = caper_repleta, lambda = "ML") 
+#anova(pgls_beta_female_ss)
+summary(pgls_beta_female_long_sp)
+
+
+pgls_H_female_long_sp<- pgls(H_f ~  log(tot.dry.mass.f) +log(sr.len) , data = caper_repleta, lambda = "ML") #Rm = mean daily reproduction
+#anova(pgls_H_female_long_sp)
+summary(pgls_H_female_long_sp)
+```
+
+### plots 
+
+#### male
+```{r}
+p_ss_e0_m<- fun_phylomorphospace2(caperData =caper_full, col_name1 = sp.total.len, col_name2 = e0_m, slope1 = 5.0467, intercept1 = 37.2928,  intercept_repl= 35.7729,slope_repl  = 9.4467)+
+  labs(x = "log Sperm length (mm)", y = "Life expectancy \u2642 (days)")+
+  theme(legend.position = "none")
+#caper_full$data%>%head()
+p_ss_e0_m
+
+p_ss_beta_m <- fun_phylomorphospace2(caperData =caper_full,col_name1 = sp.total.len, col_name2 = std_aging_rate_m, slope1 = 0.34, intercept1 = 3.31, intercept_repl = 3.61,slope_repl = 0.03 )+labs(x = "log Sperm length (mm)", y = "Standardized aging rate \u2642")+
+  #scale_y_continuous(transform = "log", )+
+  theme(legend.position = "none")
+p_ss_beta_m
+# p_ss_H_m <- fun_phylomorphospace2(caperData =caper_full,col_name1 = sp.total.len, col_name2 = H_m, slope1 = -0.04, intercept1 = 0.619777, intercept_repl = 0.4759746, slope_repl = -0.01)+labs(x = "log Sperm length (mm)", y = "Keyfitz entropy (M)")+
+#   theme(legend.position = "none")
+# p_ss_beta_m
+# p_ss_H_m
+```
+
+
+
+
+
+
+### Plots - fig 4
+```{r}
+#| fig-height: 8
+#| fig-width: 12
+p_ss_e0_f<- fun_phylomorphospace2(caperData =caper_full,col_name1 = sr.len, col_name2 = e0_f, slope1 = 4.4277, intercept1 = 35.33, slope_repl = 9.4603, intercept_repl = 27.5881)+labs(x = "log SR length (mm)", y = "Life expectancy ♀ (days)")+
+  theme(legend.position = "none",
+        plot.margin = margin(t = 20, r = 5, b = 5, l = 15, unit = "pt"))
+p_ss_e0_f
+
+
+p_ss_beta_f <- fun_phylomorphospace2(caperData =caper_full,col_name1 = sr.len, col_name2 = std_aging_rate_f, slope1 = 0.31, intercept1 = 3.25,slope_repl = 0.17761, 3.57331)+labs(x = "log SR length (mm)", y = "Standardized aging rate \u2640")+
+  theme(legend.position = "none")
+p_ss_beta_f
+
+
+# p_ss_H_f <- fun_phylomorphospace2(caperData =caper_full,col_name1 = sr.len, col_name2 = H_f, slope1 = -0.029225, intercept1 = 0.530468, slope_repl = -0.033624, intercept_repl = 0.475094)+labs(x = "log SR length (mm)", y = "Keyfitz entropy (F)")+
+#   theme(legend.position = "none")
+# p_ss_H_f
+
+
+
+ggarrange(p_ss_e0_m, p_ss_beta_m, p_ss_e0_f, p_ss_beta_f, nrow = 2, ncol = 2, labels = "auto", align = "hv", common.legend = T, legend = "none")
+```
+
+### pANCOVA Repleta with subgroup
+
+#### Make data
+
+```{r}
+
+mulleri_subgroup <- df_species_metadata$Species[which(df_species_metadata$subgroup == "mulleri")]
+
+hydei_subgroup <- df_species_metadata$Species[which(df_species_metadata$subgroup == "hydei")]
+
+repleta_subgroup <- df_species_metadata$Species[which(df_species_metadata$subgroup == "repleta")]
+
+mercatorum_subgroup <- df_species_metadata$Species[which(df_species_metadata$subgroup == "mercatorum")]   
+
+
+df_pANOVA<- df_combined%>%
+  select(Species,e0_m,e0_f, H_m,H_f,std_aging_rate_f,std_aging_rate_m, tot.dry.mass.m,tot.dry.mass.f, sp.total.len, sr.len, Broad_clade)%>%
+  mutate(Repleta_bin = case_when(Broad_clade == "Repleta" ~ "Y", .default = "N"),
+         Repleta_bin = factor(Repleta_bin),
+         repleta_subgroup =case_when(Species %in% mulleri_subgroup ~ "mulleri_subgroup",
+                                     Species %in% hydei_subgroup ~ "hydei_subgroup",
+                                     Species %in% repleta_subgroup ~ "repleta_subgroup",
+                                     Species %in% mercatorum_subgroup ~ "mercatorum_subgroup",
+                                     .default = "Non-repleta"),
+         repleta_subgroup = factor(repleta_subgroup, levels =c("Non-repleta","hydei_subgroup", "mercatorum_subgroup","mulleri_subgroup", "repleta_subgroup" )),
+         hydei_bin = case_when(
+                                     Species %in% hydei_subgroup ~ "Y",
+                                     .default = "N"),
+         hydei_bin = factor(hydei_bin))%>%
+           column_to_rownames("Species")
+  
+spp<-rownames(df_pANOVA)
+
+df_pANOVA%>%
+  select(hydei_bin)%>%
+  rownames_to_column("Species")%>%
+  left_join(caper_full$data%>%rownames_to_column("Species"), by = "Species")%>%view()
+
+```
+
+#### Male
+
+```{r}
+##e0 vs spl
+
+corPagel<-corPagel(0.1, phy = combo_phylo_demo_log$phy, form = ~ spp)
+
+# Ancova with repleta binary
+
+fit_ancova_rep_bin<- gls(e0_m ~ log(tot.dry.mass.m) + log(sp.total.len)*Repleta_bin,
+                        data=df_pANOVA,
+                        correlation=corPagel)
+anova(fit_ancova_rep_bin)
+
+
+
+
+glht_ancova_rep_bin<-glht(fit_ancova_rep_bin,linfct=mcp(Repleta_bin="Tukey"))
+summary(glht_ancova_rep_bin)
+
+
+
+
+
+fit_ancova_rep_sg<- gls(e0_m ~ log(tot.dry.mass.m) + log(sp.total.len)*repleta_subgroup,
+                        data=df_pANOVA,
+                        correlation=corPagel)
+anova(fit_ancova_rep_sg, fit_ancova_rep_bin_red)
+
+
+
+
+glht_ancova_rep_sg<-glht(fit_ancova_rep_sg,linfct=mcp(repleta_subgroup="Tukey"))
+
+
+
+fit_ancova_hyd_bin<- gls(e0_m ~ log(tot.dry.mass.m) + log(sp.total.len)*hydei_bin,
+                        data=df_pANOVA,
+                        correlation=corPagel)
+anova(fit_ancova_hyd_bin)
+
+
+
+
+glht_ancova_hyd_bin<-glht(fit_ancova_hyd_bin,linfct=mcp(hydei_bin="Tukey"))
+
+summary(glht_ancova_rep_bin)
+summary(glht_ancova_rep_sg)
+summary(glht_ancova_hyd_bin)
+```
+
+
+## Make data for toño
+```{r}
+gompertz_est%>%
+  select(Species,rate_sd,rate_sd_S.E,rate_sd_pval)%>%
+  inner_join(df1_gini_H_e0%>%select() )
+
+```
+
+# Save in the beginning, save again at the end:
+## Example
+```{r}
+filename <- paste0("../Outdir/phylo_analysis", format(Sys.time(),"%Y-%m-%d-%H-%M" ), ".RData")
+save.image(file = filename)
+```
